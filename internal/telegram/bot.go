@@ -64,7 +64,8 @@ func New(token string, store *storage.Store, resolver FeedResolver, log *slog.Lo
 	b.Handle("/add", bot.onAdd)
 	b.Handle("/list", bot.onList)
 	b.Handle("/remove", bot.onRemove)
-	b.Handle(cbUnsub, bot.onUnsubscribe)
+	// Callback endpoints are dispatched as "\f<unique>" (see telebot.ProcessUpdate).
+	b.Handle("\f"+cbUnsub, bot.onUnsubscribe)
 	return bot, nil
 }
 
