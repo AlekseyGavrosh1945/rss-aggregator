@@ -114,6 +114,17 @@ func (s *Store) Unsubscribe(ctx context.Context, userID int64, feedURL string) (
 	return tag.RowsAffected() == 1, nil
 }
 
+// UnsubscribeByID removes the user's subscription to the feed by id.
+// It reports whether a subscription was actually removed.
+func (s *Store) UnsubscribeByID(ctx context.Context, userID, feedID int64) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM subscriptions WHERE user_id = $1 AND feed_id = $2`, userID, feedID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // UserFeeds lists the feeds the user is subscribed to.
 func (s *Store) UserFeeds(ctx context.Context, userID int64) ([]Feed, error) {
 	rows, err := s.pool.Query(ctx, `

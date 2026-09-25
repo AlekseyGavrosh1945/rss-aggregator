@@ -89,6 +89,36 @@ func TestUnsubscribe(t *testing.T) {
 	}
 }
 
+func TestUnsubscribeByID(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	userID, err := st.EnsureUser(ctx, uniqueID())
+	if err != nil {
+		t.Fatalf("EnsureUser: %v", err)
+	}
+	feedURL := fmt.Sprintf("https://example.com/%d.xml", uniqueID())
+	f, _, err := st.Subscribe(ctx, userID, feedURL)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	removed, err := st.UnsubscribeByID(ctx, userID, f.ID)
+	if err != nil || !removed {
+		t.Errorf("UnsubscribeByID = %v, %v; want true, nil", removed, err)
+	}
+	if removed, err := st.UnsubscribeByID(ctx, userID, f.ID); err != nil || removed {
+		t.Errorf("second UnsubscribeByID = %v, %v; want false, nil", removed, err)
+	}
+	feeds, err := st.UserFeeds(ctx, userID)
+	if err != nil {
+		t.Fatalf("UserFeeds: %v", err)
+	}
+	if len(feeds) != 0 {
+		t.Errorf("UserFeeds after unsubscribe = %+v, want empty", feeds)
+	}
+}
+
 func TestCreatePostsDeduplicates(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()

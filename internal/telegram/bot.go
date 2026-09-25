@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,12 +16,16 @@ import (
 	"github.com/AlekseyGavrosh1945/rss-aggregator/internal/storage"
 )
 
+// cbUnsub is the unique callback id of the "unsubscribe" inline button;
+// the button data carries the feed id.
+const cbUnsub = "unsub"
+
 const helpText = `Я RSS-агрегатор 📡
 
 Команды:
 /add <ссылка> — подписаться на RSS/Atom-фид (можно просто адрес сайта — ленту найду сам)
-/list — показать подписки
-/remove <ссылка> — отписаться
+/list — показать подписки, отписаться можно кнопкой
+/remove <ссылка> — отписаться текстом
 /help — справка
 
 Новые посты из ваших фидов буду присылать сюда автоматически.`
@@ -59,6 +64,7 @@ func New(token string, store *storage.Store, resolver FeedResolver, log *slog.Lo
 	b.Handle("/add", bot.onAdd)
 	b.Handle("/list", bot.onList)
 	b.Handle("/remove", bot.onRemove)
+	b.Handle(cbUnsub, bot.onUnsubscribe)
 	return bot, nil
 }
 
@@ -126,19 +132,75 @@ func (b *Bot) onList(c tg.Context) error {
 		return c.Send("Что-то сломалось, попробуйте позже.")
 	}
 	if len(feeds) == 0 {
-		return c.Send("Пока нет подписок. Добавьте первую: /add <ссылка на фид>")
+		return c.Send("Пока нет подписок. Добавьте первую: /add <ссылка на сайт или фид>")
 	}
 
-	var sb strings.Builder
-	sb.WriteString("Ваши подписки:\n")
-	for i, f := range feeds {
-		fmt.Fprintf(&sb, "%d. %s", i+1, displayTitle(f))
-		if f.LastError != "" {
-			sb.WriteString(" ⚠️ (ошибка получения)")
-		}
-		sb.WriteString("\n")
+	text, markup := renderSubscriptions(feeds)
+	return c.Send(text, markup)
+}
+
+// onUnsubscribe handles clicks on the "unsubscribe" inline button:
+// it removes the subscription and re-renders the list message.
+func (b *Bot) onUnsubscribe(c tg.Context) error {
+	feedID, err := strconv.ParseInt(c.Data(), 10, 64)
+	if err != nil {
+		return c.Respond(&tg.CallbackResponse{Text: "Некорректная кнопка"})
 	}
-	return c.Send(sb.String())
+
+	ctx := context.Background()
+	userID, err := b.store.EnsureUser(ctx, c.Sender().ID)
+	if err != nil {
+		b.log.Error("ensure user", "err", err)
+		return c.Respond(&tg.CallbackResponse{Text: "Ошибка, попробуйте позже"})
+	}
+
+	removed, err := b.store.UnsubscribeByID(ctx, userID, feedID)
+	if err != nil {
+		b.log.Error("unsubscribe", "err", err)
+		return c.Respond(&tg.CallbackResponse{Text: "Ошибка, попробуйте позже"})
+	}
+	if !removed {
+		return c.Respond(&tg.CallbackResponse{Text: "Вы уже отписаны от этой ленты"})
+	}
+
+	feeds, err := b.store.UserFeeds(ctx, userID)
+	if err != nil {
+		b.log.Error("list feeds", "err", err)
+		return c.Respond(&tg.CallbackResponse{Text: "Отписался, но список не обновился"})
+	}
+	if len(feeds) == 0 {
+		if err := c.Edit("Пока нет подписок. Добавьте первую: /add <ссылка на сайт или фид>"); err != nil {
+			b.log.Warn("edit message", "err", err)
+		}
+	} else {
+		text, markup := renderSubscriptions(feeds)
+		if err := c.Edit(text, markup); err != nil {
+			b.log.Warn("edit message", "err", err)
+		}
+	}
+	return c.Respond(&tg.CallbackResponse{Text: "Отписался 👌"})
+}
+
+// renderSubscriptions builds the subscription list text and an inline
+// keyboard with an "unsubscribe" button per feed.
+func renderSubscriptions(feeds []storage.Feed) (string, *tg.ReplyMarkup) {
+	var sb strings.Builder
+	sb.WriteString("Ваши подписки (кнопка отписывает):\n")
+
+	markup := &tg.ReplyMarkup{}
+	rows := make([]tg.Row, 0, len(feeds))
+	for i, f := range feeds {
+		status := ""
+		if f.LastError != "" {
+			status = " ⚠️"
+		}
+		title := displayTitle(f)
+		fmt.Fprintf(&sb, "%d. %s%s\n", i+1, title, status)
+		btn := markup.Data("❌ "+truncateRunes(title, 30), cbUnsub, strconv.FormatInt(f.ID, 10))
+		rows = append(rows, markup.Row(btn))
+	}
+	markup.Inline(rows...)
+	return sb.String(), markup
 }
 
 func (b *Bot) onRemove(c tg.Context) error {
@@ -201,6 +263,14 @@ func displayTitle(f storage.Feed) string {
 		return f.URL
 	}
 	return f.Title
+}
+
+func truncateRunes(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-1]) + "…"
 }
 
 var htmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
