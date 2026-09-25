@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Habr / Go</title>
+    <link>https://habr.com/ru/hubs/go/</link>
+    <description>Статьи про Go</description>
+    <item>
+      <title>Первая новость</title>
+      <link>https://habr.com/ru/articles/1/</link>
+      <guid isPermaLink="false">habr-1</guid>
+      <pubDate>Mon, 01 Sep 2025 10:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Вторая новость</title>
+      <link>https://habr.com/ru/articles/2/</link>
+      <pubDate>Tue, 02 Sep 2025 11:30:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>

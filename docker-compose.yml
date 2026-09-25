@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rss
+      POSTGRES_PASSWORD: rss
+      POSTGRES_DB: rss
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rss -d rss"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://rss:rss@db:5432/rss?sslmode=disable
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      FETCH_INTERVAL: ${FETCH_INTERVAL:-1m}
+      FETCH_TIMEOUT: ${FETCH_TIMEOUT:-15s}
+      WORKERS: ${WORKERS:-8}
+      HTTP_ADDR: ${HTTP_ADDR:-:8080}
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
