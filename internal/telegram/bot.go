@@ -18,23 +18,30 @@ import (
 const helpText = `Я RSS-агрегатор 📡
 
 Команды:
-/add <ссылка> — подписаться на RSS/Atom-фид
+/add <ссылка> — подписаться на RSS/Atom-фид (можно просто адрес сайта — ленту найду сам)
 /list — показать подписки
 /remove <ссылка> — отписаться
 /help — справка
 
 Новые посты из ваших фидов буду присылать сюда автоматически.`
 
+// FeedResolver maps a user-supplied URL to an actual feed URL
+// (implemented by feed.Fetcher).
+type FeedResolver interface {
+	ResolveFeedURL(ctx context.Context, rawURL string) (string, error)
+}
+
 // Bot wraps the telebot client, handles commands and sends notifications.
 type Bot struct {
-	bot   *tg.Bot
-	store *storage.Store
-	log   *slog.Logger
+	bot      *tg.Bot
+	store    *storage.Store
+	resolver FeedResolver
+	log      *slog.Logger
 }
 
 // New creates the bot. An empty token returns (nil, nil): the bot is
 // disabled and the app keeps working in fetch-only mode.
-func New(token string, store *storage.Store, log *slog.Logger) (*Bot, error) {
+func New(token string, store *storage.Store, resolver FeedResolver, log *slog.Logger) (*Bot, error) {
 	if token == "" {
 		return nil, nil
 	}
@@ -46,7 +53,7 @@ func New(token string, store *storage.Store, log *slog.Logger) (*Bot, error) {
 		return nil, fmt.Errorf("create bot: %w", err)
 	}
 
-	bot := &Bot{bot: b, store: store, log: log}
+	bot := &Bot{bot: b, store: store, resolver: resolver, log: log}
 	b.Handle("/start", bot.onStart)
 	b.Handle("/help", bot.onHelp)
 	b.Handle("/add", bot.onAdd)
@@ -71,21 +78,29 @@ func (b *Bot) onStart(c tg.Context) error {
 func (b *Bot) onHelp(c tg.Context) error { return c.Send(helpText) }
 
 func (b *Bot) onAdd(c tg.Context) error {
-	feedURL := strings.TrimSpace(c.Message().Payload)
-	if feedURL == "" {
-		return c.Send("Использование: /add <ссылка на RSS-фид>")
+	raw := strings.TrimSpace(c.Message().Payload)
+	if raw == "" {
+		return c.Send("Использование: /add <ссылка на сайт или RSS-фид>")
 	}
-	if !isHTTPURL(feedURL) {
-		return c.Send("Это не похоже на ссылку. Нужен URL вида https://example.com/feed.xml")
+	if !isHTTPURL(raw) {
+		return c.Send("Это не похоже на ссылку. Нужен URL вида https://example.com")
 	}
 
-	userID, err := b.store.EnsureUser(context.Background(), c.Sender().ID)
+	ctx := context.Background()
+	resolved, err := b.resolver.ResolveFeedURL(ctx, raw)
+	if err != nil {
+		b.log.Warn("resolve feed", "url", raw, "err", err)
+		return c.Send("Не смог найти RSS-ленту по этой ссылке. " +
+			"Попробуйте прямую ссылку на фид — обычно она заканчивается на /feed или /rss.")
+	}
+
+	userID, err := b.store.EnsureUser(ctx, c.Sender().ID)
 	if err != nil {
 		b.log.Error("ensure user", "err", err)
 		return c.Send("Не получилось сохранить подписку, попробуйте позже.")
 	}
 
-	f, isNew, err := b.store.Subscribe(context.Background(), userID, feedURL)
+	f, isNew, err := b.store.Subscribe(ctx, userID, resolved)
 	if err != nil {
 		b.log.Error("subscribe", "err", err)
 		return c.Send("Не получилось сохранить подписку, попробуйте позже.")
@@ -94,6 +109,7 @@ func (b *Bot) onAdd(c tg.Context) error {
 		return c.Send("Вы уже подписаны на " + displayTitle(f))
 	}
 	return c.Send("Подписка оформлена: " + displayTitle(f) +
+		"\nЛента: " + f.URL +
 		"\nНовые посты будут приходить сюда автоматически.")
 }
 

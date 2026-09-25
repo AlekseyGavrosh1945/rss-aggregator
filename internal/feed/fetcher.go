@@ -4,6 +4,7 @@ package feed
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -23,15 +24,23 @@ type FeedData struct {
 	Items []Item
 }
 
+// userAgent identifies the bot to the sites it fetches.
+const userAgent = "rss-aggregator/1.0 (+https://github.com/AlekseyGavrosh1945/rss-aggregator)"
+
 // Fetcher downloads feeds and converts them to FeedData.
 type Fetcher struct {
 	parser  *gofeed.Parser
+	client  *http.Client
 	timeout time.Duration
 }
 
 // NewFetcher creates a Fetcher with the given per-request timeout.
 func NewFetcher(timeout time.Duration) *Fetcher {
-	return &Fetcher{parser: gofeed.NewParser(), timeout: timeout}
+	return &Fetcher{
+		parser:  gofeed.NewParser(),
+		client:  &http.Client{Timeout: timeout},
+		timeout: timeout,
+	}
 }
 
 // Fetch downloads and parses the feed at url.

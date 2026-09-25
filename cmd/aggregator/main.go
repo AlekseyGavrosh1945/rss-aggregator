@@ -51,7 +51,9 @@ func run() error {
 	}
 	log.Info("database ready")
 
-	bot, err := telegram.New(cfg.BotToken, store, log)
+	fetcher := feed.NewFetcher(cfg.FetchTimeout)
+
+	bot, err := telegram.New(cfg.BotToken, store, fetcher, log)
 	if err != nil {
 		return fmt.Errorf("init telegram bot: %w", err)
 	}
@@ -61,7 +63,7 @@ func run() error {
 		notifier = bot
 	}
 
-	sched := scheduler.New(store, feed.NewFetcher(cfg.FetchTimeout), notifier,
+	sched := scheduler.New(store, fetcher, notifier,
 		cfg.FetchInterval, cfg.Workers, log)
 	go sched.Run(ctx)
 
